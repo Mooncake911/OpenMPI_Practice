@@ -16,19 +16,36 @@ import subprocess
 class DoExperiments:
     def __init__(self, exe_path: str,
                  from_n: int = 1, to_n: int = 16,
-                 from_iters: int = 90, to_iters: int = 9000000, iters_step: float = 10,
+                 from_iters: int = 10, to_iters: int = 1000000,
+                 iter_step: float = 10, step_mode: str = "*",
                  args_in_right_order=tuple()):
 
         self.path = exe_path
-        self.from_n = from_n
-        self.to_n = to_n
+        self.from_n = min(int(from_n), int(to_n))
+        self.to_n = max(int(from_n), int(to_n))
 
-        self.from_iters = from_iters
-        self.to_iters = to_iters
-        self.iters_step = iters_step
+        self.from_iters = min(int(from_iters), int(to_iters))
+        self.to_iters = max(int(from_iters), int(to_iters))
+        self.iter_step = iter_step
+        self.step_mode = step_mode
 
         self.my_args = args_in_right_order
         self.data_list = []
+
+        self.rise_error()
+
+    def rise_error(self):
+        if self.from_n == 0:
+            raise ValueError(f"from_n: {self.from_n} != 0")
+        if self.iter_step <= 1:
+            raise ValueError(f"iters_step: {self.iter_step} <= 1")
+
+    def make_step(self, s):
+        if self.step_mode == "+":
+            s += self.iter_step
+        if self.step_mode == "*":
+            s *= self.iter_step
+        return s
 
     def start_open_mpi(self, n, *args):
         """ C++ code to start in commandline interface """
@@ -37,23 +54,20 @@ class DoExperiments:
         process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
         if stdout:
-            output = [float(x) for x in stdout.decode().split()]
+            output = [x for x in stdout.decode().split()]
             return output
-        if stderr:
-            raise Exception(stderr.decode())
+        elif stderr:
+            print(f"[::COMMAND RISE ERROR]\n {command} =>", Exception(stderr.decode()))
+            return
 
     def run(self, filename):
         """ Run the experiments with OpenMPI """
-        if self.iters_step <= 1:
-            raise ValueError(f"iters_step: {self.iters_step} <= 1")
-
         iters = self.from_iters
         while iters <= self.to_iters:
-            iters = int(iters)
             for n in range(self.from_n, self.to_n + 1):
-                time = self.start_open_mpi(n, iters, *self.my_args)[0]
-                self.data_list.append([n, iters, time])
-            iters *= self.iters_step
+                output = self.start_open_mpi(n, iters, *self.my_args)
+                self.data_list.append([n, iters, *output])
+            iters = int(self.make_step(iters))
 
         with open(filename, 'w', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
